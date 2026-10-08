@@ -25,6 +25,10 @@ It includes automatic refresh, optional low-remaining-usage notifications for fr
 
 The first release targets Windows x64. The installer is an **unsigned developer build**; Windows may display a publisher or SmartScreen warning. Verify that the download comes from this repository before running it.
 
+**[Download Codex Dashboard 0.1.0 for Windows x64](https://github.com/Haochihaochi/codex-dashboard/releases/download/v0.1.0/Codex-Dashboard-0.1.0-windows-x64.exe)** — sign in to the private repository to download. See the [release page](https://github.com/Haochihaochi/codex-dashboard/releases/tag/v0.1.0) for notes.
+
+To build a fresh installer through GitHub:
+
 1. Open [Build Windows desktop app](https://github.com/Haochihaochi/codex-dashboard/actions/workflows/build.yml) and choose **Run workflow**.
 2. After a successful run, download the `Codex-Dashboard-windows-x64` artifact and extract it.
 3. Run `Codex-Dashboard-0.1.0-windows-x64.exe` and follow the installer.
@@ -61,11 +65,14 @@ The manually triggered Windows workflow installs locked dependencies, runs tests
 
 The initial build passed 18 fixture tests, TypeScript checking, the production build, and native smoke tests in both development Electron and the packaged Windows executable. Native checks cover local fixture reading, rejected invalid inputs and links, manual usage editing, demo switching, settings navigation, and light/dark themes. A read-only scan of real local Codex logs also succeeded. Large-log scans report incomplete totals explicitly.
 
+The [initial Windows CI run](https://github.com/Haochihaochi/codex-dashboard/actions/runs/37801264987) also passed the full pipeline, including a clean dependency install, tests, production build, installer packaging, and packaged-app smoke checks.
+
 ## Data and limitations
 
 - All usage collection and settings storage are local. No provider credentials, OAuth connection, paid API, external backend, or telemetry are required.
 - Local records are observations, not authoritative account billing. They may be missing, old, incomplete, or recorded under another device or profile. The app displays source and freshness information.
 - When a recorded reset time passes, the app needs a fresh observation; it does not assume the provider has restored your allowance.
+- Available usage-reset credits are not exposed by the supported local logs. Their card is populated only in labeled demo mode; real data explicitly says they are not reported.
 - Scans are bounded to keep refresh work manageable. Token totals cover 14 local calendar days from the records included in the scan and may omit activity. Today's hourly and model breakdowns are derived from those records. They are not billable cost estimates.
 - Claude Code activity cannot establish a subscription percentage. Cursor and Gemini entries stay manual until you update them.
 - Exports contain provider usage summaries, labels, and warnings, along with the app version, export time, and demo flag. Desktop exports omit settings, configured folder paths, and raw conversations. Review usage patterns and manually entered labels before sharing an export.
