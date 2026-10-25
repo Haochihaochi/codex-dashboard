@@ -13,7 +13,7 @@ An independent, original project inspired by [CodexBar](https://codexbar.app/?la
 | Cursor      | Manual entry                        | A usage percentage, reset time, window name, and optional plan label                     |
 | Gemini      | Manual entry                        | A usage percentage, reset time, window name, and optional plan label                     |
 
-The app starts with real local data. The tray and desktop window share a compact, scrollable black-and-mint layout: provider tabs, remaining-usage cards, today's token chart, and model activity. Hourly activity uses your computer's local timezone; unavailable details stay unreported. Demo mode is an explicit, labeled option for exploring the interface.
+The app starts with real account and local activity data. The tray and desktop window share a compact, scrollable black-and-mint layout: provider tabs, remaining-usage cards, today's token chart, and model activity. Hourly activity uses your computer's local timezone; unavailable details stay unreported. Demo mode is an explicit, labeled option for exploring the interface.
 
 It includes automatic refresh, optional low-remaining-usage notifications for fresh Codex quota, opt-in launch at login, theme settings, local folder selection, and JSON export.
 
@@ -67,7 +67,7 @@ The manually triggered Windows workflow installs locked dependencies, runs tests
 
 ## Validation
 
-Version 0.2.0 passed 29 tests, TypeScript checking, the production build, and a native Electron smoke test. Tests cover read-only account RPCs, timeout recovery, cached readings and backoff, profile changes, log-cache invalidation, quota parsing, token accounting, and settings validation. A real account check succeeded again after restarting the client. A repeated local scan measured 9 ms versus 94 ms for the initial scan on the validation machine; results depend on history size.
+Version 0.2.0 passed 29 tests, TypeScript checking, the production build, and native smoke tests for development Electron and the packaged executable. The [Windows CI build](https://github.com/Haochihaochi/codex-dashboard/actions/runs/40204645046) passed the same pipeline. Tests cover read-only account RPCs, timeout recovery, cached readings and backoff, profile changes, log-cache invalidation, quota parsing, token accounting, and settings validation. The installed app was verified showing **Account connected**, and a real account check succeeded again after restarting the client. A repeated local scan measured 9 ms versus 94 ms for the initial scan on the validation machine; results depend on history size.
 
 The [initial Windows CI run](https://github.com/Haochihaochi/codex-dashboard/actions/runs/37801264987) also passed the full pipeline, including a clean dependency install, tests, production build, installer packaging, and packaged-app smoke checks.
 
