@@ -16,7 +16,7 @@ export interface DailyUsage {
 export interface ProviderSnapshot {
   id: ProviderId;
   name: string;
-  source: 'local' | 'manual' | 'demo' | 'unavailable';
+  source: 'account' | 'local' | 'manual' | 'demo' | 'unavailable';
   status: 'connected' | 'needs-setup' | 'error';
   plan: string | null;
   updatedAt: string | null;
@@ -33,6 +33,15 @@ export interface ProviderSnapshot {
   hourly?: { hour: number; totalTokens: number }[];
   models?: { model: string; totalTokens: number; sessionCount: number }[];
   resetCredits?: { count: number; expiresAt: string | null }[];
+  resetCreditCount?: number;
+  connection?: AccountConnection;
+}
+export interface AccountConnection {
+  status: 'connected' | 'retrying' | 'signed-out' | 'unavailable';
+  checkedAt: string;
+  lastSuccessAt: string | null;
+  fromCache: boolean;
+  message: string;
 }
 export interface Settings {
   demoMode: boolean;

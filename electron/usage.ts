@@ -1,6 +1,7 @@
 import { lstat, open, readdir } from 'node:fs/promises';
 import { basename, join, resolve } from 'node:path';
 import { homedir } from 'node:os';
+import { APP_VERSION } from '../src/shared/version';
 import type {
   DailyUsage,
   DashboardState,
@@ -36,6 +37,32 @@ type Counts = {
 };
 type LogFile = { path: string; mtime: number; size: number };
 type Scan = { files: LogFile[]; warnings: Set<string>; exists: boolean; failed: boolean };
+type CachedEvents = {
+  key: string;
+  events: Event[];
+  truncated: boolean;
+  bytes: number;
+  warnings: string[];
+  memory: number;
+};
+const eventCache = new Map<string, CachedEvents>();
+let cacheMemory = 0;
+let cacheHits = 0;
+let cacheMisses = 0;
+export function usageCacheStats() {
+  return {
+    entries: eventCache.size,
+    memoryBytes: cacheMemory,
+    hits: cacheHits,
+    misses: cacheMisses,
+  };
+}
+export function clearUsageCache() {
+  eventCache.clear();
+  cacheMemory = 0;
+  cacheHits = 0;
+  cacheMisses = 0;
+}
 
 function object(value: unknown): Json | null {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -141,7 +168,11 @@ async function isRealDirectory(path: string): Promise<boolean> {
 }
 
 async function providerRoots(path: string, id: 'codex' | 'claude'): Promise<string[]> {
-  const resolved = resolve(path || join(homedir(), id === 'codex' ? '.codex' : '.claude'));
+  const resolved = resolve(
+    path ||
+      (id === 'codex' ? process.env.CODEX_HOME : '') ||
+      join(homedir(), id === 'codex' ? '.codex' : '.claude'),
+  );
   if (!(await isRealDirectory(resolved))) return [resolved];
   const children = id === 'codex' ? ['sessions', 'archived_sessions'] : ['projects'];
   const roots: string[] = [];
@@ -206,6 +237,17 @@ async function readEvents(
   allowance: number,
   warnings: Set<string>,
 ): Promise<{ events: Event[]; truncated: boolean; bytes: number }> {
+  const key = `${file.mtime}:${file.size}:${allowance}`;
+  const cached = eventCache.get(file.path);
+  if (cached?.key === key) {
+    cacheHits++;
+    for (const message of cached.warnings) warnings.add(message);
+    eventCache.delete(file.path);
+    eventCache.set(file.path, cached);
+    return cached;
+  }
+  cacheMisses++;
+  const fileWarnings = new Set<string>();
   let handle;
   try {
     // Recheck before opening because an active CLI can rotate a file after discovery.
@@ -220,7 +262,9 @@ async function readEvents(
     const { bytesRead } = await handle.read(buffer, 0, length, start);
     const truncated = start > 0;
     if (truncated)
-      warnings.add('Large logs were read from a bounded tail. Activity totals are a lower bound.');
+      fileWarnings.add(
+        'Large logs were read from a bounded tail. Activity totals are a lower bound.',
+      );
     let content = buffer.subarray(0, bytesRead).toString('utf8');
     if (truncated) {
       const firstBreak = content.indexOf('\n');
@@ -234,14 +278,41 @@ async function readEvents(
         const data = object(JSON.parse(lines[index]));
         if (!data) continue;
         const time = eventTime(data.timestamp);
-        if (Number.isFinite(time)) events.push({ data, time, sequence: index });
+        const extracted = extractUsageEvent(data);
+        if (Number.isFinite(time) && extracted)
+          events.push({ data: extracted, time, sequence: index });
       } catch {
         // An unfinished last line is normal while the CLI is writing; older bad lines are disclosed.
         if (index !== lines.length - 1)
-          warnings.add('Malformed log entries were skipped. Activity totals may be incomplete.');
+          fileWarnings.add(
+            'Malformed log entries were skipped. Activity totals may be incomplete.',
+          );
       }
     }
     events.sort((a, b) => a.time - b.time || a.sequence - b.sequence);
+    const memory = Buffer.byteLength(JSON.stringify(events)) * 2 + events.length * 128;
+    const previous = eventCache.get(file.path);
+    if (previous) {
+      eventCache.delete(file.path);
+      cacheMemory -= previous.memory;
+    }
+    while (eventCache.size && (cacheMemory + memory > 16 * 1024 * 1024 || eventCache.size >= 600)) {
+      const oldest = eventCache.keys().next().value!;
+      cacheMemory -= eventCache.get(oldest)!.memory;
+      eventCache.delete(oldest);
+    }
+    if (memory <= 16 * 1024 * 1024) {
+      eventCache.set(file.path, {
+        key,
+        events,
+        truncated,
+        bytes: bytesRead,
+        warnings: [...fileWarnings],
+        memory,
+      });
+      cacheMemory += memory;
+    }
+    for (const message of fileWarnings) warnings.add(message);
     return { events, truncated, bytes: bytesRead };
   } catch {
     warnings.add('Some log files could not be read.');
@@ -249,6 +320,85 @@ async function readEvents(
   } finally {
     await handle?.close();
   }
+}
+
+/** Cache only usage fields. Conversation text, commands, paths, and auth records are discarded. */
+function extractUsageEvent(data: Json): Json | null {
+  const payload = object(data.payload);
+  const shortId = (value: unknown) => (typeof value === 'string' ? value.slice(0, 256) : undefined);
+  if (data.type === 'session_meta')
+    return { type: data.type, payload: { id: shortId(payload?.id) } };
+  if (data.type === 'turn_context')
+    return { type: data.type, payload: { model: safeLabel(payload?.model) } };
+  if (data.type === 'event_msg' && payload?.type === 'token_count') {
+    const info = object(payload.info);
+    const rawCounts = (value: unknown) => {
+      const counts = codexCounts(value);
+      return counts
+        ? {
+            input_tokens: counts.inputTokens,
+            output_tokens: counts.outputTokens,
+            cached_input_tokens: counts.cachedTokens,
+            total_tokens: counts.totalTokens,
+          }
+        : null;
+    };
+    const rate_limits = parseLimits(payload.rate_limits).map((limit) => {
+      const window = (index: number) => {
+        const item = limit.windows[index];
+        return item
+          ? {
+              used_percent: item.usedPercent,
+              window_minutes: item.windowMinutes,
+              resets_at: item.resetsAt ? Date.parse(item.resetsAt) / 1000 : null,
+            }
+          : null;
+      };
+      const firstLabel = limit.windows[0]?.label ?? '';
+      const secondaryOnly = limit.windows.length === 1 && /(?:^| · )Secondary$/.test(firstLabel);
+      return {
+        limit_id: limit.key,
+        plan_type: limit.plan,
+        limit_name: firstLabel.includes(' · ') ? firstLabel.split(' · ')[0] : null,
+        primary: secondaryOnly ? null : window(0),
+        secondary: secondaryOnly ? window(0) : window(1),
+      };
+    });
+    return {
+      type: data.type,
+      payload: {
+        type: 'token_count',
+        info: {
+          total_token_usage: rawCounts(info?.total_token_usage),
+          last_token_usage: rawCounts(info?.last_token_usage),
+        },
+        rate_limits,
+      },
+    };
+  }
+  if (data.type === 'assistant') {
+    const message = object(data.message),
+      usage = object(message?.usage);
+    if (!usage) return null;
+    return {
+      type: data.type,
+      sessionId: shortId(data.sessionId),
+      uuid: shortId(data.uuid),
+      message: {
+        id: shortId(message?.id),
+        model: safeLabel(message?.model),
+        usage: Object.fromEntries(
+          [
+            'input_tokens',
+            'output_tokens',
+            'cache_read_input_tokens',
+            'cache_creation_input_tokens',
+          ].map((key) => [key, count(usage[key])]),
+        ),
+      },
+    };
+  }
+  return null;
 }
 
 function codexCounts(value: unknown): Counts | null {
@@ -572,5 +722,10 @@ export async function buildState(
       provider.message = `Add a manual ${provider.name} quota window. Automatic account sync is not connected.`;
     }
   }
-  return { providers, settings: { ...settings }, refreshedAt: now.toISOString(), version: '0.1.0' };
+  return {
+    providers,
+    settings: { ...settings },
+    refreshedAt: now.toISOString(),
+    version: APP_VERSION,
+  };
 }

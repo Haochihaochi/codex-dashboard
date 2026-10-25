@@ -11,6 +11,7 @@ import {
   shell,
   Notification,
   session,
+  powerMonitor,
   type IpcMainInvokeEvent,
 } from 'electron';
 import { join } from 'node:path';
@@ -18,6 +19,7 @@ import { pathToFileURL } from 'node:url';
 import { writeFile, mkdir } from 'node:fs/promises';
 import { createStore } from './store';
 import { buildState } from './usage';
+import { createCodexAccountClient, applyAccountSnapshot } from './codex-account';
 import { collectAlerts } from './alerts';
 import { createDemoState } from '../src/lib/demo';
 import type { DashboardState, Settings } from '../src/shared/types';
@@ -36,6 +38,30 @@ let timer: ReturnType<typeof setInterval> | undefined;
 let timerPending = false;
 let store: ReturnType<typeof createStore>;
 const alertKeys = new Set<string>();
+const accountClient = createCodexAccountClient(
+  smoke
+    ? {
+        query: async () => ({
+          identity: 'isolated-smoke-account',
+          quota: {
+            plan: 'pro',
+            observedAt: new Date().toISOString(),
+            windows: [
+              {
+                label: 'Weekly',
+                usedPercent: 25,
+                windowMinutes: 10080,
+                resetsAt: new Date(Date.now() + 86400000).toISOString(),
+                observedAt: new Date().toISOString(),
+              },
+            ],
+            resetCreditCount: 1,
+            resetCredits: [{ count: 1, expiresAt: new Date(Date.now() + 86400000).toISOString() }],
+          },
+        }),
+      }
+    : {},
+);
 let work: Promise<unknown> = Promise.resolve();
 function serial<T>(fn: () => Promise<T>): Promise<T> {
   const next = work.then(fn, fn);
@@ -98,11 +124,17 @@ function schedule() {
       });
   }, store.getSettings().refreshSeconds * 1000);
 }
-async function refresh() {
+async function refresh(forceAccount = false) {
   const settings = store.getSettings();
-  state = settings.demoMode
-    ? createDemoState(settings)
-    : await buildState(settings, store.getManualUsage());
+  if (settings.demoMode) state = createDemoState(settings);
+  else {
+    const [local, account] = await Promise.all([
+      buildState(settings, store.getManualUsage()),
+      accountClient.read(settings.codexPath, forceAccount),
+    ]);
+    state = local;
+    applyAccountSnapshot(state.providers.find((provider) => provider.id === 'codex')!, account);
+  }
   for (const window of [main, popup])
     if (window && !window.isDestroyed()) window.webContents.send('dashboard:changed', state);
   const selected = state.providers.find((p) => p.id === settings.selectedProvider);
@@ -192,7 +224,7 @@ async function boot() {
   session.defaultSession.setPermissionCheckHandler(() => false);
   session.defaultSession.on('will-download', (event) => event.preventDefault());
   handle('state', () => serial(async () => state ?? (await refresh())));
-  handle('refresh', () => serial(refresh));
+  handle('refresh', () => serial(() => refresh(true)));
   handle('settings', (patch: Partial<Settings>) =>
     serial(async () => {
       if (
@@ -275,19 +307,22 @@ async function boot() {
       {
         label: 'Refresh usage',
         click: () => {
-          void serial(refresh).catch(() => undefined);
+          void serial(() => refresh(true)).catch(() => undefined);
         },
       },
       { type: 'separator' },
       { label: 'Quit', click: () => app.quit() },
     ]),
   );
+  if (!smoke && !process.argv.includes('--hidden')) showMain();
   await serial(refresh);
   schedule();
   if (!smoke) {
     applyLogin(store.getSettings());
-    if (!process.argv.includes('--hidden')) showMain();
   }
+  powerMonitor.on('resume', () => {
+    void serial(() => refresh(true)).catch(() => undefined);
+  });
   if (smoke) await runSmoke();
 }
 async function runSmoke() {
@@ -305,7 +340,9 @@ async function runSmoke() {
     const api=window.codexDashboard; const live=await api.getState();
     if(live.providers.length!==4||live.settings.demoMode) throw new Error('Live state unavailable');
     const fixture=live.providers.find(p=>p.id==='codex');
-    if(!fixture.windows.length || fixture.windows[0].usedPercent!==25) throw new Error('Local fixture not read');
+    if(!fixture.windows.length || fixture.windows[0].usedPercent!==25 || fixture.today.totalTokens!==1000) throw new Error('Local activity or account fixture not read');
+    if(fixture.connection?.status!=='connected'||fixture.resetCreditCount!==1)throw new Error('Account connection unavailable');
+    if(!document.body.textContent.includes('Account connected')) throw new Error('Account connection UI missing');
     let rejected=false;try{await api.updateSettings({refreshSeconds:1})}catch{rejected=true}if(!rejected)throw new Error('Invalid setting accepted');
     rejected=false;try{await api.openExternal('file:///etc/passwd')}catch{rejected=true}if(!rejected)throw new Error('External URL accepted');
     await api.saveManualUsage({provider:'cursor',usedPercent:42,resetsAt:new Date(Date.now()+86400000).toISOString(),windowLabel:'Monthly',plan:'Pro'});
@@ -360,6 +397,7 @@ else {
   });
   app.on('before-quit', () => {
     quitting = true;
+    accountClient.dispose();
     if (timer) clearInterval(timer);
     tray?.destroy();
   });

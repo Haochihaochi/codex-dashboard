@@ -18,6 +18,8 @@ The main process owns privileged operations. The renderer receives normalized `D
 
 Shared TypeScript types define providers, recorded usage windows, daily token activity, optional hourly and model breakdowns, settings, and manual entries. Source labels distinguish local observations, manual input, demo data, and unavailable sources. A missing source is represented as unavailable rather than a fabricated usage percentage.
 
+An account source is added for current Codex quota. `electron/codex-account.ts` discovers the installed native CLI, spawns an owned stdio app-server child, initializes the connection, reads existing account state without forcing token renewal, and reads account limits. It sends no login/logout or inference requests and reads no credential files. Each poll closes its own child after the response; closing this client does not sign out Codex. Normal credential management remains inside the official CLI. See the [official app-server protocol](https://learn.chatgpt.com/docs/app-server) for method definitions.
+
 ## Data collection
 
 Codex scanning looks for recorded rate-limit and token-usage events in local session JSONL files. It uses the event's observation time and any recorded reset time. A reset passing does not prove the current allowance: fresh provider activity is needed to observe the next window.
@@ -30,11 +32,15 @@ Per-provider scans consider at most 600 directories and 20,000 entries, select a
 
 Activity is aggregated over 14 local calendar days. Today's totals, hourly buckets, session count, and model rows use the computer's local timezone. Missing model information is shown as unknown. These are summaries of observed local events, not an account-wide billing ledger.
 
+Only supported usage fields survive parsing. An LRU cache, capped at 600 entries and a 16 MiB accounting budget, keys extracted events by path, mtime, size, and scan allowance. Changed, growing, deleted, or newly discovered files are handled on the next scan; raw transcript payloads are never cached.
+
 ## Refresh and presentation
 
 The app defaults to local data and refreshes on a configurable interval or explicit refresh. The main process builds a snapshot used by the dashboard and tray view. Both windows use the same compact, scrollable panel with a black-and-mint default theme, provider tabs, remaining-usage cards, today's token activity, and model rows. Settings open within the panel. There is no sidebar. Demo mode generates sample snapshots and is visibly labeled so sample numbers cannot be mistaken for live account information.
 
-Optional notifications evaluate fresh local quota windows against the user's remaining-usage threshold. Demo values, manual entries, absent windows, and expired observations do not produce quota alerts. Claude token activity alone has no quota window to alert on. Launch at login and notifications are disabled by default.
+Local activity and account checks run in parallel. Account checks are deduplicated and cached for two minutes; failures back off from 30 seconds to five minutes and retain the previous quota with its original observation timestamp. The UI labels retained quota as the last account reading. A confirmed missing sign-in clears the in-memory account quota without changing authentication. Explicit refresh, a changed Codex home, and resume from sleep refresh the connection. A slower configured interval also slows account polling. Local activity and account quota retain separate freshness indicators.
+
+Optional notifications evaluate fresh quota windows against the user's remaining-usage threshold. Demo values, manual entries, preserved account readings after failed checks, absent windows, and expired observations do not produce quota alerts. Claude token activity alone has no quota window to alert on. Launch at login and notifications are disabled by default.
 
 Theme, selected provider, local folder settings, and manual records remain on the user's machine. Desktop JSON export uses a native save dialog and includes only app version, export time, the demo flag, and normalized provider snapshots. Settings, configured folder paths, and raw source records are omitted. Provider labels, usage patterns, and generic scan warnings remain in the export.
 

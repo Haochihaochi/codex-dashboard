@@ -1,4 +1,5 @@
 import { defaultSettings } from '../shared/defaults';
+import { APP_VERSION } from '../shared/version';
 import type { DashboardState, ProviderSnapshot, Settings } from '../shared/types';
 
 export function createDemoProviders(now = new Date()): ProviderSnapshot[] {
@@ -96,6 +97,6 @@ export function createDemoState(settings: Settings = defaultSettings): Dashboard
     providers: createDemoProviders(),
     settings,
     refreshedAt: new Date().toISOString(),
-    version: '0.1.0',
+    version: APP_VERSION,
   };
 }

@@ -2,10 +2,13 @@
 
 Codex Dashboard is a local Windows application. It reads usage metadata from selected local Codex and Claude Code JSONL folders and stores app preferences and manual usage entries in Electron's per-user application data directory.
 
+Account usage is fetched through the locally installed official Codex CLI's app-server protocol. The child uses the same Codex home and sign-in as the user's installation. Dashboard requests are restricted to `initialize`, `initialized`, `account/read` with `refreshToken: false`, and `account/rateLimits/read`. No model turn, login, logout, forced token refresh, reset-credit consumption, or token-file access is implemented. Codex itself owns normal credential renewal and network authentication.
+
 ## Data boundaries
 
 - Provider authentication stays with the provider's own application or CLI. The dashboard does not request API keys, passwords, session cookies, or OAuth tokens.
 - Local session files can contain sensitive conversation content. The scanner must read records to identify usage events, but only extracted usage metadata is sent to the renderer. Raw conversations are not displayed, copied into app settings, or included in usage exports.
+- The bounded log cache contains only extracted usage fields. Account quota is cached in memory during temporary outages. Subprocess stderr, credential fields, account IDs, email addresses, and opaque reset-credit IDs are not exposed to the renderer or exports.
 - The app has no external backend or telemetry. Opening a provider or repository link launches the user's browser and is subject to that website's own privacy policy.
 - Desktop JSON exports are written only after the user chooses a destination. They include normalized provider summaries, warnings, manual labels, the app version, export time, and demo flag. They omit settings and configured folder paths. Review usage patterns and user-entered labels before sharing them.
 - Preferences and usage summaries are not encrypted by the app. They inherit the permissions of the Windows user profile. This app does not protect data from other software running as the same user.

@@ -2,7 +2,12 @@ import { mkdtemp, mkdir, rm, symlink, utimes, writeFile } from 'node:fs/promises
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { readClaudeUsage, readCodexUsage } from '../electron/usage';
+import {
+  clearUsageCache,
+  usageCacheStats,
+  readClaudeUsage,
+  readCodexUsage,
+} from '../electron/usage';
 
 const folders: string[] = [];
 const now = new Date(2026, 9, 8, 20, 0);
@@ -52,6 +57,24 @@ afterEach(async () => {
 });
 
 describe('Codex local usage', () => {
+  it('reuses sanitized unchanged logs, invalidates growing files, and never uses a deleted log', async () => {
+    clearUsageCache();
+    const root = await fixture();
+    await log(root, 'cached.jsonl', [
+      usage(at(8), 100),
+      { timestamp: at(8), type: 'response_item', payload: { content: 'PRIVATE_TRANSCRIPT' } },
+    ]);
+    expect((await readCodexUsage(root, now)).totalTokens).toBe(100);
+    expect(usageCacheStats().misses).toBe(1);
+    expect((await readCodexUsage(root, now)).totalTokens).toBe(100);
+    expect(usageCacheStats().hits).toBe(1);
+    await log(root, 'cached.jsonl', [usage(at(8), 100), usage(at(8, 13), 200)]);
+    expect((await readCodexUsage(root, now)).totalTokens).toBe(200);
+    expect(usageCacheStats().misses).toBe(2);
+    await rm(join(root, 'cached.jsonl'));
+    expect((await readCodexUsage(root, now)).totalTokens).toBe(0);
+    expect(usageCacheStats().memoryBytes).toBeLessThan(16 * 1024 * 1024);
+  });
   it('sorts timestamps, applies cumulative deltas, and buckets today by local hour and actual model', async () => {
     const root = await fixture();
     await log(root, 'session.jsonl', [

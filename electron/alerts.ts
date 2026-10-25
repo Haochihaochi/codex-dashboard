@@ -12,7 +12,12 @@ export function collectAlerts(
   const result: UsageAlert[] = [];
   const active = new Set<string>();
   for (const provider of state.providers) {
-    if (provider.source !== 'local' || provider.status !== 'connected') continue;
+    if (
+      !['local', 'account'].includes(provider.source) ||
+      provider.status !== 'connected' ||
+      provider.connection?.fromCache
+    )
+      continue;
     for (const window of provider.windows) {
       const observed = Date.parse(window.observedAt ?? '');
       if (!Number.isFinite(observed) || now - observed > 2 * 3600_000 || observed > now + 60_000)
@@ -26,7 +31,7 @@ export function collectAlerts(
         sent.add(key);
         result.push({
           title: `${provider.name}: ${Math.round(remaining)}% remaining`,
-          body: `${window.label} is below your ${state.settings.alertThreshold}% alert threshold. Based on the latest local record.`,
+          body: `${window.label} is below your ${state.settings.alertThreshold}% alert threshold. Based on the latest ${provider.source === 'account' ? 'account check' : 'local record'}.`,
         });
       }
     }

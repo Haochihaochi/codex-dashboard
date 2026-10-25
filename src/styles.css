@@ -20,6 +20,34 @@
   --shadow: 0 14px 50px #0006;
   color-scheme: dark;
 }
+.account-connection {
+  margin: -6px 0 22px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.65;
+}
+.account-connection > div {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.account-connection svg {
+  margin-top: 3px;
+  color: var(--mint);
+}
+.account-connection small {
+  display: block;
+  color: var(--subtle);
+  margin-top: 4px;
+}
+.account-connection .text-button {
+  margin: 7px 0 0 23px;
+}
+.account-connection.retrying svg,
+.account-connection.unavailable svg,
+.account-connection.signed-out svg {
+  color: var(--danger);
+}
 :root[data-theme='light'] {
   color-scheme: light;
   --bg: #f5f7f7;

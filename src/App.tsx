@@ -94,14 +94,20 @@ function Status({ provider }: { provider: ProviderSnapshot }) {
       ? 'Demo data'
       : provider.source === 'manual'
         ? 'Manual entry'
-        : provider.status === 'connected'
-          ? 'Local data'
-          : provider.status === 'error'
-            ? 'Read error'
-            : 'Not connected';
+        : provider.connection?.status === 'signed-out'
+          ? 'Codex sign-in required'
+          : provider.source === 'account'
+            ? provider.connection?.fromCache
+              ? 'Last account reading'
+              : 'Account connected'
+            : provider.status === 'connected'
+              ? 'Local data'
+              : provider.status === 'error'
+                ? 'Read error'
+                : 'Not connected';
   return (
     <span
-      className={`status ${provider.status === 'connected' ? 'good' : provider.status === 'error' ? 'error' : ''}`}
+      className={`status ${provider.connection && provider.connection.status !== 'connected' ? '' : provider.status === 'connected' ? 'good' : provider.status === 'error' ? 'error' : ''}`}
     >
       <span />
       {text}
@@ -388,8 +394,8 @@ function SettingsPage({
       <section className="panel settings-panel">
         <div className="panel-heading">
           <div>
-            <h2>Local data sources</h2>
-            <p>Session files stay on your computer.</p>
+            <h2>Codex connection & local activity</h2>
+            <p>Uses the sign-in already managed by Codex.</p>
           </div>
           <ShieldCheck size={21} />
         </div>
@@ -430,8 +436,9 @@ function SettingsPage({
         <div className="source-note">
           <ShieldCheck size={16} />
           <span>
-            No API keys or account passwords needed. Codex and Claude Code activity comes from local
-            session files. Cursor and Gemini usage is entered manually.
+            Codex account usage refreshes through the installed Codex app or CLI. Your sign-in stays
+            with Codex. Local files provide token and model activity; Cursor and Gemini usage is
+            entered manually.
           </span>
         </div>
       </section>
@@ -850,6 +857,30 @@ export default function App() {
               </button>
             ))}
           </nav>
+          {selected.connection && (
+            <aside
+              className={`account-connection ${selected.connection.status}`}
+              aria-live="polite"
+            >
+              <div>
+                <ShieldCheck size={15} />
+                <p>
+                  {selected.connection.message}
+                  <small>
+                    Account checked {age(selected.connection.checkedAt)}
+                    {selected.connection.fromCache && selected.connection.lastSuccessAt
+                      ? ` · Last success ${age(selected.connection.lastSuccessAt)}`
+                      : ''}
+                  </small>
+                </p>
+              </div>
+              {selected.connection.status !== 'connected' && (
+                <button className="text-button" disabled={busy} onClick={() => void refresh()}>
+                  Retry connection
+                </button>
+              )}
+            </aside>
+          )}
           <section className="remaining-section">
             <div className="section-heading">
               <h2>REMAINING USAGE</h2>
@@ -858,7 +889,11 @@ export default function App() {
                   ? 'SAMPLE ACCOUNT'
                   : selected.source === 'manual'
                     ? 'MANUAL ENTRY'
-                    : 'LOCAL SNAPSHOT'}
+                    : selected.source === 'account'
+                      ? selected.connection?.fromCache
+                        ? 'LAST ACCOUNT READING'
+                        : 'ACCOUNT USAGE'
+                      : 'LOCAL SNAPSHOT'}
               </span>
             </div>
             {selected.windows.length ? (
@@ -885,7 +920,7 @@ export default function App() {
                 </button>
               </div>
             )}
-            {selected.resetCredits?.length ? (
+            {selected.resetCredits?.length || selected.resetCreditCount !== undefined ? (
               <article className="card reset-card">
                 <div className="reset-card-heading">
                   <span>
@@ -894,12 +929,14 @@ export default function App() {
                   </span>
                   <span>
                     <strong>
-                      {selected.resetCredits.reduce((sum, credit) => sum + credit.count, 0)}
+                      {selected.resetCreditCount ??
+                        selected.resetCredits?.reduce((sum, credit) => sum + credit.count, 0) ??
+                        0}
                     </strong>{' '}
                     available
                   </span>
                 </div>
-                {selected.resetCredits.map((credit, index) => (
+                {selected.resetCredits?.map((credit, index) => (
                   <div className="reset-credit" key={index}>
                     <div>
                       <strong>
@@ -976,6 +1013,9 @@ export default function App() {
             {state.settings.refreshSeconds < 60
               ? `${state.settings.refreshSeconds}s`
               : `${state.settings.refreshSeconds / 60}m`}
+            {selected.connection
+              ? ` / account ${Math.max(2, Math.ceil(state.settings.refreshSeconds / 60))}m`
+              : ''}
           </small>
         </div>
         <div className="footer-actions">

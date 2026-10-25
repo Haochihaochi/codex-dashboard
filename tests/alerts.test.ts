@@ -36,6 +36,19 @@ function snapshot(): DashboardState {
   };
 }
 describe('native usage alerts', () => {
+  it('alerts on fresh account checks and skips preserved readings after a connection failure', () => {
+    const state = snapshot();
+    state.providers[0].source = 'account';
+    expect(collectAlerts(state, new Set(), now)).toHaveLength(1);
+    state.providers[0].connection = {
+      status: 'retrying',
+      checkedAt: new Date(now).toISOString(),
+      lastSuccessAt: new Date(now).toISOString(),
+      fromCache: true,
+      message: 'Retrying',
+    };
+    expect(collectAlerts(state, new Set(), now)).toHaveLength(0);
+  });
   it('notifies once per window and rearms after recovery', () => {
     const s = snapshot(),
       seen = new Set<string>();
